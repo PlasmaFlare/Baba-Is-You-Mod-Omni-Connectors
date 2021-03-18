@@ -136,7 +136,135 @@ function calculatesentences(unitid,x,y,dir)
 			end
 		end
 	end
-	
+
+	-- @End Phase 2
+	for _, branch in ipairs(branches) do
+		local rhs_sentences = {}
+		local rhs_totalvariants = 1
+		for _, word_unitid in ipairs(branch.firstwords) do
+			br_sentences,br_finals,br_maxpos,br_totalvariants = calculatesentences(word_unitid, branch.x, branch.y, br_dir)
+			maxpos = math.max(maxpos, br_maxpos + branch.step_index)
+			rhs_totalvariants = rhs_totalvariants * br_totalvariants
+
+			if (rhs_totalvariants >= limiter) then
+				MF_alert("Level destroyed - too many variants C")
+				destroylevel("toocomplex")
+				return nil
+			end
+
+			for _, sentence in ipairs(br_sentences) do
+				table.insert(rhs_sentences, sentence)
+			end
+		end
+
+		if #branch.branching_texts > 0 then
+			totalvariants = totalvariants + branch.lhs_totalvariants * rhs_totalvariants
+
+			if (totalvariants >= limiter) then
+				MF_alert("Level destroyed - too many variants E")
+				destroylevel("toocomplex")
+				return nil
+			end
+
+			for step = 1, branch.step_index do
+				combo[step] = 1
+			end
+
+			local branch_text_combo = 1
+
+			for i = 1, branch.lhs_totalvariants do
+				local br_step = 1
+				local lhs_sentence = {}
+
+				while (br_step <= branch.step_index) do
+					local c = combo[br_step]
+					
+					if (c ~= nil) then
+						if (c > 0) then
+							
+							local word = nil
+							if br_step == branch.step_index then
+								word = branch.branching_texts[c]
+							else
+								local s = sents[br_step]
+								word = s[c]
+							end
+							
+							local w = word[2]
+							
+							print("inserting into lhs "..word[3])
+							
+							-- table.insert(sentences[i], {word[3], word[4], word[1], word[2]})
+							local text_name = parse_branching_text(word[3])
+							table.insert(lhs_sentence, {text_name, word[4], word[1], word[2]})
+							
+							br_step = br_step + w
+						else
+							break
+						end
+					else
+						MF_alert("c is nil, " .. tostring(step))
+						break
+					end
+				end
+
+				for _, rhs_sent in ipairs(br_sentences) do
+					local final_sentence = {}
+					for _, sent_word in ipairs(lhs_sentence) do
+						table.insert(final_sentence, sent_word)
+					end
+					
+					for _, sent_word in ipairs(rhs_sent) do
+						table.insert(final_sentence, sent_word)
+					end
+
+					table.insert(sentences, final_sentence)
+					table.insert(finals, {})
+				end
+
+				if (branch.num_combospots > 0) then
+					combostep = 0
+					
+					local targetstep = combospots[combostep + 1]
+					
+					combo[targetstep] = combo[targetstep] + 1
+
+					local combo_num = 0
+					local maxcombo = 0
+					if targetstep == branch.step_index then
+						combo_num = branch_text_combo
+						maxcombo = #branch.branching_texts
+					else
+						combo_num = combo[targetstep]
+						maxcombo = variantshere[targetstep]
+					end
+					
+					while (combo_num > maxcombo) do
+						if targetstep == branch.step_index then
+							branch_text_combo = 1
+						else
+							combo[targetstep] = 1
+						end
+						
+						combostep = (combostep + 1) % branch.num_combospots
+						
+						targetstep = combospots[combostep + 1]
+						
+						
+						if targetstep == branch.step_index then
+							branch_text_combo = branch_text_combo + 1
+							combo_num = branch_text_combo
+							maxcombo = #branch.branching_texts
+						else
+							combo[targetstep] = combo[targetstep] + 1
+							combo_num = combo[targetstep]
+							maxcombo = variantshere[targetstep]
+						end
+					end
+				end
+			end
+		end
+	end
 	--[[
 	MF_alert(tostring(totalvariants) .. ", " .. tostring(#sentences))
 	for i,v in ipairs(sentences) do
@@ -151,4 +279,577 @@ function calculatesentences(unitid,x,y,dir)
 	]]--
 	
 	return sentences,finals,maxpos,totalvariants
+end
+
+function docode(firstwords)
+	local donefirstwords = {}
+	local limiter = 0
+	
+	if (#firstwords > 0) then
+		for k,unitdata in ipairs(firstwords) do
+			if (type(unitdata[1]) == "number") then
+				timedmessage("Old rule format detected. Please replace modified .lua files to ensure functionality.")
+			end
+			
+			local unitids = unitdata[1]
+			local unitid = unitids[1]
+			local dir = unitdata[2]
+			local width = unitdata[3]
+			local word = unitdata[4]
+			local wtype = unitdata[5]
+			
+			if (string.sub(word, 1, 5) == "text_") then
+				word = string.sub(word, 6)
+			end
+			
+			local unit = mmf.newObject(unitid)
+			local x,y = unit.values[XPOS],unit.values[YPOS]
+			local tileid = x + y * roomsizex
+			
+			--MF_alert("Testing " .. word .. ": " .. tostring(donefirstwords[tileid]) .. ", " .. tostring(dir) .. ", " .. tostring(unitid))
+			limiter = limiter + 1
+			
+			if (limiter > 5000) then
+				MF_alert("Level destroyed - firstwords run too many times")
+				destroylevel("toocomplex")
+				return
+			end
+			
+			if (donefirstwords[tileid] == nil) or ((donefirstwords[tileid] ~= nil) and (donefirstwords[tileid][dir] == nil)) and (limiter < 5000) then
+				local ox,oy = 0,0
+				local name = word
+				
+				local drs = dirs[dir]
+				ox = drs[1]
+				oy = drs[2]
+				
+				if (donefirstwords[tileid] == nil) then
+					donefirstwords[tileid] = {}
+				end
+				
+				donefirstwords[tileid][dir] = 1
+				
+				local sentences,finals,maxlen,variations = calculatesentences(unitid,x,y,dir)
+				
+				if (sentences == nil) then
+					return
+				end
+				
+				--MF_alert(tostring(k) .. ", " .. tostring(variations))
+				
+				if (maxlen > 2) then
+					for i=1,variations do
+						local current = finals[i]
+						local letterword = ""
+						local stage = 0
+						local prevstage = 0
+						local tileids = {}
+						
+						local notids = {}
+						local notwidth = 0
+						local notslot = 0
+						
+						local stage3reached = false
+						local stage2reached = false
+						local doingcond = false
+						local nocondsafterthis = false
+						local condsafeand = false
+						
+						local firstrealword = false
+						local letterword_prevstage = 0
+						local letterword_firstid = 0
+						
+						local currtiletype = 0
+						local prevtiletype = 0
+						
+						local prevsafewordid = 0
+						local prevsafewordtype = 0
+						
+						local stop = false
+						
+						local sent = sentences[i]
+						
+						local thissent = ""
+						
+						for wordid=1,#sent do
+							local s = sent[wordid]
+							local nexts = sent[wordid + 1] or {-1, -1, {-1}, 1}
+							
+							prevtiletype = currtiletype
+							
+							local tilename = s[1]
+							local tiletype = s[2]
+							local tileid = s[3][1]
+							local tilewidth = s[4]
+							
+							local wordtile = false
+							
+							currtiletype = tiletype
+							
+							local dontadd = false
+							
+							thissent = thissent .. tilename .. "," .. tostring(wordid) .. "  "
+							
+							for a,b in ipairs(s[3]) do
+								table.insert(tileids, b)
+							end
+							
+							--[[
+								0 = objekti
+								1 = verbi
+								2 = quality
+								3 = alkusana (LONELY)
+								4 = Not
+								5 = letter
+								6 = And
+								7 = ehtosana
+								8 = customobject
+							]]--
+							
+							if (tiletype ~= 5) then
+								if (stage == 0) then
+									if (tiletype == 0) then
+										prevstage = stage
+										stage = 2
+									elseif (tiletype == 3) then
+										prevstage = stage
+										stage = 1
+									elseif (tiletype ~= 4) then
+										prevstage = stage
+										stage = -1
+										stop = true
+									end
+								elseif (stage == 1) then
+									if (tiletype == 0) then
+										prevstage = stage
+										stage = 2
+									elseif (tiletype == 6) then
+										prevstage = stage
+										stage = 6
+									elseif (tiletype ~= 4) then
+										prevstage = stage
+										stage = -1
+										stop = true
+									end
+								elseif (stage == 2) then
+									if (wordid ~= #sent) then
+										if (tiletype == 1) and (prevtiletype ~= 4) and ((prevstage ~= 4) or doingcond or (stage3reached == false)) then
+											stage2reached = true
+											doingcond = false
+											prevstage = stage
+											nocondsafterthis = true
+											stage = 3
+										elseif ((tiletype == 7) and (stage2reached == false) and (nocondsafterthis == false)) then
+											doingcond = true
+											condsafeand = true
+											prevstage = stage
+											stage = 3
+										elseif (tiletype == 6) and (prevtiletype ~= 4) then
+											prevstage = stage
+											stage = 4
+										elseif (tiletype ~= 4) then
+											prevstage = stage
+											stage = -1
+											stop = true
+										end
+									else
+										stage = -1
+										stop = true
+									end
+								elseif (stage == 3) then
+									stage3reached = true
+									
+									if (tiletype == 0) or (tiletype == 2) or (tiletype == 8) then
+										prevstage = stage
+										stage = 5
+									elseif (tiletype ~= 4) then
+										stage = -1
+										stop = true
+									end
+								elseif (stage == 4) then
+									if (wordid <= #sent) then
+										if (tiletype == 0) or ((tiletype == 2) and stage3reached) or ((tiletype == 8) and stage3reached) then
+											prevstage = stage
+											stage = 2
+										elseif ((tiletype == 1) and stage3reached) and (doingcond == false) and (prevtiletype ~= 4) then
+											stage2reached = true
+											nocondsafterthis = true
+											prevstage = stage
+											stage = 3
+										elseif (tiletype == 7) and (nocondsafterthis == false) and ((prevtiletype ~= 6) or ((prevtiletype == 6) and condsafeand)) then
+											doingcond = true
+											stage2reached = true
+											condsafeand = true
+											prevstage = stage
+											stage = 3
+										elseif (tiletype ~= 4) then
+											prevstage = stage
+											stage = -1
+											stop = true
+										end
+									else
+										stage = -1
+										stop = true
+									end
+								elseif (stage == 5) then
+									if (wordid ~= #sent) then
+										if (tiletype == 1) and doingcond and (prevtiletype ~= 4) then
+											stage2reached = true
+											doingcond = false
+											prevstage = stage
+											nocondsafterthis = true
+											stage = 3
+										elseif (tiletype == 6) and (prevtiletype ~= 4) then
+											prevstage = stage
+											stage = 4
+										elseif (tiletype ~= 4) then
+											prevstage = stage
+											stage = -1
+											stop = true
+										end
+									else
+										stage = -1
+										stop = true
+									end
+								elseif (stage == 6) then
+									if (tiletype == 3) then
+										prevstage = stage
+										stage = 1
+									elseif (tiletype ~= 4) then
+										prevstage = stage
+										stage = -1
+										stop = true
+									end
+								end
+							end
+							
+							if (stage > 0) then
+								firstrealword = true
+							end
+							
+							if (tiletype == 4) then
+								if (#notids == 0) then
+									notids = s[3]
+									notwidth = tilewidth
+									notslot = wordid
+								end
+							else
+								if (stop == false) and (tiletype ~= 0) then
+									notids = {}
+									notwidth = 0
+									notslot = 0
+								end
+							end
+							
+							if (prevtiletype ~= 4) then
+								prevsafewordid = wordid - 1
+								prevsafewordtype = prevtiletype
+							end
+							
+							--MF_alert(tilename .. ", " .. tostring(wordid) .. ", " .. tostring(stage) .. ", " .. tostring(#sent) .. ", " .. tostring(tiletype) .. ", " .. tostring(prevtiletype) .. ", " .. tostring(stop))
+							
+							--MF_alert(tostring(k) .. "_" .. tostring(i) .. "_" .. tostring(wordid) .. ": " .. tilename .. ", " .. tostring(tiletype) .. ", " .. tostring(stop) .. ", " .. tostring(stage) .. ", " .. tostring(letterword_firstid).. ", " .. tostring(prevtiletype))
+							
+							if (stop == false) then
+								if (dontadd == false) then
+									table.insert(current, {tilename, tiletype, tileids, tilewidth})
+									tileids = {}
+								end
+							else
+								for a=1,#s[3] do
+									if (#tileids > 0) then
+										table.remove(tileids, #tileids)
+									end
+								end
+								
+								if (tiletype == 0) and (prevtiletype == 0) and (#notids > 0) then
+									notids = {}
+									notwidth = 0
+								end
+								
+								if (wordid < #sent) then
+									if (wordid > 1) then
+										if (#notids > 0) and firstrealword and (notslot > 1) and (tiletype ~= 7) and ((tiletype ~= 1) or ((tiletype == 1) and (prevtiletype == 0))) then
+											--MF_alert("Notstatus added to firstwords" .. ", " .. tostring(wordid) .. ", " .. tostring(nexts[2]))
+											table.insert(firstwords, {notids, dir, notwidth, "not", 4})
+											
+											if (nexts[2] ~= nil) and ((nexts[2] == 0) or (nexts[2] == 3) or (nexts[2] == 4)) and (tiletype ~= 3) then
+												--MF_alert("Also added " .. tostring(wordid) .. ", " .. tilename)
+												table.insert(firstwords, {s[3], dir, tilewidth, tilename, tiletype})
+											end
+										else
+											if (prevtiletype == 0) and ((tiletype == 1) or (tiletype == 7)) then
+												--MF_alert("Added previous word: " .. sent[wordid - 1][1] .. " to firstwords")
+												table.insert(firstwords, {sent[wordid - 1][3], dir, tilewidth, tilename, tiletype})
+											elseif (prevsafewordtype == 0) and (prevsafewordid > 0) and (prevtiletype == 4) and (tiletype ~= 1) and (tiletype ~= 2) then
+												--MF_alert("Added previous safe word: " .. sent[prevsafewordid][1] .. " to firstwords")
+												table.insert(firstwords, {sent[prevsafewordid][3], dir, tilewidth, tilename, tiletype})
+											else
+												--MF_alert("Added the current word: " .. s[1] .. " to firstwords")
+												table.insert(firstwords, {s[3], dir, tilewidth, tilename, tiletype})
+											end
+										end
+										
+										break
+									elseif (wordid == 1) then
+										if (nexts[3][1] ~= -1) then
+											--MF_alert(nexts[1] .. " added to firstwords E" .. ", " .. tostring(wordid))
+											table.insert(firstwords, {nexts[3], dir, nexts[4], nexts[1], nexts[2]})
+										end
+										
+										break
+									end
+								end
+							end
+						end
+						
+						--MF_alert(thissent)
+					end
+				end
+				
+				if (#finals > 0) then
+					for i,sentence in ipairs(finals) do
+						local group_objects = {}
+						local group_targets = {}
+						local group_conds = {}
+						
+						local group = group_objects
+						local stage = 0
+						
+						local prefix = ""
+						
+						local allowedwords = {0}
+						local allowedwords_extra = {}
+						
+						local testing = ""
+						
+						local extraids = {}
+						local extraids_current = ""
+						local extraids_ifvalid = {}
+						
+						local valid = true
+						
+						if (#finals > 1) then
+							for a,b in ipairs(finals) do
+								if (#b == #sentence) and (a > i) then
+									local identical = true
+									
+									for c,d in ipairs(b) do
+										local currids = d[3]
+										local equivids = sentence[c][3] or {}
+										
+										for e,f in ipairs(currids) do
+											--MF_alert(tostring(a) .. ": " .. tostring(f) .. ", " .. tostring(equivids[e]))
+											if (f ~= equivids[e]) then
+												identical = false
+											end
+										end
+									end
+									
+									if identical then
+										--MF_alert(sentence[1][1] .. ", " .. sentence[2][1] .. ", " .. sentence[3][1] .. " (" .. tostring(i) .. ") is identical to " .. b[1][1] .. ", " .. b[2][1] .. ", " .. b[3][1] .. " (" .. tostring(a) .. ")")
+										valid = false
+									end
+								end
+							end
+						end
+						
+						if valid then
+							for index,wdata in ipairs(sentence) do
+								local wname = wdata[1]
+								local wtype = wdata[2]
+								local wid = wdata[3]
+								
+								testing = testing .. wname .. ", "
+								
+								local wcategory = -1
+								
+								if (wtype == 1) or (wtype == 3) or (wtype == 7) then
+									wcategory = 1
+								elseif (wtype ~= 4) and (wtype ~= 6) then
+									wcategory = 0
+								else
+									table.insert(extraids_ifvalid, {prefix .. wname, wtype, wid})
+									extraids_current = wname
+								end
+								
+								if (wcategory == 0) then
+									local allowed = false
+									
+									for a,b in ipairs(allowedwords) do
+										if (b == wtype) then
+											allowed = true
+											break
+										end
+									end
+									
+									if (allowed == false) then
+										for a,b in ipairs(allowedwords_extra) do
+											if (wname == b) then
+												allowed = true
+												break
+											end
+										end
+									end
+									
+									if allowed then
+										table.insert(group, {prefix .. wname, wtype, wid})
+									else
+										table.insert(firstwords, {{wid[1]}, dir, 1, wname, wtype})
+										break
+									end
+								elseif (wcategory == 1) then
+									if (index < #sentence) then
+										allowedwords = {0}
+										allowedwords_extra = {}
+										
+										local realname = unitreference["text_" .. wname]
+										local cargtype = false
+										local cargextra = false
+										
+										local argtype = {0}
+										local argextra = {}
+										
+										if (changes[realname] ~= nil) then
+											local wchanges = changes[realname]
+											
+											if (wchanges.argtype ~= nil) then
+												argtype = wchanges.argtype
+												cargtype = true
+											end
+											
+											if (wchanges.argextra ~= nil) then
+												argextra = wchanges.argextra
+												cargextra = true
+											end
+										end
+										
+										if (cargtype == false) or (cargextra == false) then
+											local wvalues = tileslist[realname] or {}
+											
+											if (cargtype == false) then
+												argtype = wvalues.argtype or {0}
+											end
+											
+											if (cargextra == false) then
+												argextra = wvalues.argextra or {}
+											end
+										end
+										
+										--MF_alert(wname .. ", " .. tostring(realname) .. ", " .. "text_" .. wname)
+										
+										if (realname == nil) then
+											MF_alert("No object found for " .. wname .. "!")
+											valid = false
+											break
+										else
+											if (wtype == 1) then
+												allowedwords = argtype
+												
+												stage = 1
+												local target = {prefix .. wname, wtype, wid}
+												table.insert(group_targets, {target, {}})
+												local sid = #group_targets
+												group = group_targets[sid][2]
+												
+												newcondgroup = 1
+											elseif (wtype == 3) then
+												allowedwords = {0}
+												local cond = {prefix .. wname, wtype, wid}
+												table.insert(group_conds, {cond, {}})
+											elseif (wtype == 7) then
+												allowedwords = argtype
+												allowedwords_extra = argextra
+												
+												stage = 2
+												local cond = {prefix .. wname, wtype, wid}
+												table.insert(group_conds, {cond, {}})
+												local sid = #group_conds
+												group = group_conds[sid][2]
+											end
+										end
+									end
+								end
+								
+								if (wtype == 4) then
+									if (prefix == "not ") then
+										prefix = ""
+									else
+										prefix = "not "
+									end
+								else
+									prefix = ""
+								end
+								
+								if (wname ~= extraids_current) and (string.len(extraids_current) > 0) and (wtype ~= 4) then
+									for a,extraids_valid in ipairs(extraids_ifvalid) do
+										table.insert(extraids, {prefix .. extraids_valid[1], extraids_valid[2], extraids_valid[3]})
+									end
+									
+									extraids_ifvalid = {}
+									extraids_current = ""
+								end
+							end
+							--MF_alert("Testing: " .. testing)
+							
+							local conds = {}
+							local condids = {}
+							for c,group_cond in ipairs(group_conds) do
+								local rule_cond = group_cond[1][1]
+								--table.insert(condids, group_cond[1][3])
+								
+								condids = copytable(condids, group_cond[1][3])
+								
+								table.insert(conds, {rule_cond,{}})
+								local condgroup = conds[#conds][2]
+								
+								for e,condword in ipairs(group_cond[2]) do
+									local rule_condword = condword[1]
+									--table.insert(condids, condword[3])
+									
+									condids = copytable(condids, condword[3])
+									
+									table.insert(condgroup, rule_condword)
+								end
+							end
+							
+							for c,group_object in ipairs(group_objects) do
+								local rule_object = group_object[1]
+								
+								for d,group_target in ipairs(group_targets) do
+									local rule_verb = group_target[1][1]
+									
+									for e,target in ipairs(group_target[2]) do
+										local rule_target = target[1]
+										
+										local finalconds = {}
+										for g,finalcond in ipairs(conds) do
+											table.insert(finalconds, {finalcond[1], finalcond[2]})
+										end
+										
+										local rule = {rule_object,rule_verb,rule_target}
+										
+										local ids = {}
+										ids = copytable(ids, group_object[3])
+										ids = copytable(ids, group_target[1][3])
+										ids = copytable(ids, target[3])
+										
+										for g,h in ipairs(extraids) do
+											ids = copytable(ids, h[3])
+										end
+										
+										for g,h in ipairs(condids) do
+											ids = copytable(ids, h)
+										end
+									
+										addoption(rule,finalconds,ids)
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
 end
