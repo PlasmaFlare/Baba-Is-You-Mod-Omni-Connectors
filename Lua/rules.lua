@@ -18,8 +18,30 @@ function calculatesentences(unitid,x,y,dir)
 	local combospots = {}
 	
 	local unit = mmf.newObject(unitid)
+
+	local branches = {} -- keep track of which points in the sentence parsing we parse vertically
+	local found_branch_on_last_word = false -- flag for detecting if the tail end of a sentence parsed in one direction continues perpendicularly without branching
+	-- And tree stuff
+	local and_tree = {
+		root = nil,
+		leaf = nil,
+	}
+	local and_tree_root = nil -- root of the tree 
+	local and_tree_leaf = nil -- current leaf of the tree
+	local sent_index_to_node = {} -- mapping of index in sentences -> node in tree
+	-- Other vars: unit.br_detected_splitted_parsing: only present in branching and units. Indicates if this br_and has text in both directions. Used to determine which sentences to potentially eliminate in docode
+
+	local br_dir = nil
+	local br_dir_vec = nil
+	if dir == 1 then
+		br_dir = 2
+	elseif dir == 2 then
+		br_dir = 1
+	end
+	br_dir_vec = dirs[br_dir]
 	
 	local done = false
+	-- @Phase 1
 	while (done == false) and (totalvariants < limiter) do
 		local words,letters,jletters = codecheck(unitid,ox*step,oy*step,dir,true)
 		
@@ -57,13 +79,122 @@ function calculatesentences(unitid,x,y,dir)
 					end
 				end
 				
+				local branching_texts = {}
+
 				for i,v in ipairs(words) do
 					--unitids, width, word, wtype, dir
 					
 					--MF_alert("Step " .. tostring(step) .. ", word " .. v[3] .. " here")
-					
 					table.insert(sents[step], v)
+
+					local text_name = v[3]
+					if name_is_branching_text(text_name) then
+						-- Gather all branching texts to do the perp calculatesentences on
+						table.insert(branching_texts, v)
+
+						-- initialize every branching text to not use sentence elimination by default
+						local br_unit = mmf.newObject(v[1][1])
+						br_unit.br_detected_splitted_parsing = false
+					end
 				end
+
+				-- Get a test unit id from branching texts to use in codecheck. (Used to "step" perpendicularly)
+				local test_br_unitid = nil
+				if #branching_texts > 0 then
+					test_br_unitid = branching_texts[1][1][1]
+				end
+
+				found_branch_on_last_word = false
+				if br_dir_vec and test_br_unitid then
+					-- Step perpendicularly. If there's text there, record essential information needed to parse that branch.
+					local br_x = x + ox*step + br_dir_vec[1]
+					local br_y = y + oy*step + br_dir_vec[2]
+					local br_tileid = br_x + br_y * roomsizex
+					local br_words, br_letters, br_justletters = codecheck(test_br_unitid, br_dir_vec[1], br_dir_vec[2], br_dir, true)
+					
+
+					if #br_words > 0 then
+						local br_firstwords = {}
+
+						--@cleanup: Normally we shouldn't need to record an entire list of firstwords, 
+						-- but weirdly enough, directly recording the first element and using it in the later codecheck that steps perpendicularly
+						-- causes a stack overflow error for some reason... Note that this was during setting br_unit.br_detected_splitted_parsing flag
+						--  inside a unit object. Could that be the reason?
+						for _, word in ipairs(br_words) do
+							table.insert(br_firstwords, word[1][1])
+						end
+						for _, br_text in ipairs(branching_texts) do
+							if name_is_branching_and(br_text[3]) then
+								local br_unit = mmf.newObject(br_text[1][1])
+								br_unit.br_detected_splitted_parsing = true
+
+														-- Build the and_tree
+								-- if name_is_branching_and(text_name) then
+								-- 	local and_node = {
+								-- 		count = 0,
+								-- 		parent = nil
+								-- 	}
+								-- 	if and_tree.root == nil then
+								-- 		and_tree.root = and_node
+								-- 	else
+								-- 		and_node.parent = and_tree.leaf
+								-- 	end
+
+								-- 	and_tree.leaf = and_node
+								-- end
+							end
+						end
+						local t = {
+							branching_texts = branching_texts,
+							step_index = step, 
+							lhs_totalvariants = totalvariants/#words*#branching_texts,
+							x = br_x,
+							y = br_y,
+							firstwords = br_firstwords,
+							num_combospots = #combospots
+						}
+
+						table.insert(branches, t)
+						found_branch_on_last_word = true
+					end
+				end
+
+				-- local test_br_unitid = nil
+				-- if #branching_texts > 0 then
+				-- 	test_br_unitid = branching_texts[1][1][1]
+				-- end
+
+				-- found_branch_on_last_word = false
+				-- if br_dir_vec and test_br_unitid then
+					
+				-- 	local br_x = x + ox*step + br_dir_vec[1]
+				-- 	local br_y = y + oy*step + br_dir_vec[2]
+				-- 	local br_tileid = br_x + br_y * roomsizex
+				-- 	local br_words, br_letters, br_justletters = codecheck(test_br_unitid, br_dir_vec[1], br_dir_vec[2], br_dir, true)
+					
+
+				-- 	if #br_words > 0 then
+				-- 		local br_firstwords = {}
+
+				-- 		for _, word in ipairs(br_words) do
+				-- 			table.insert(br_firstwords, word[1][1])
+				-- 		end
+
+				-- 		local t = {
+				-- 			branching_texts = branching_texts,
+				-- 			-- branching_and_text = branching_and_texts,
+				-- 			step_index = step, 
+				-- 			lhs_totalvariants = totalvariants/#words*#branching_texts,
+				-- 			x = br_x,
+				-- 			y = br_y,
+				-- 			firstwords = br_firstwords,
+				-- 			num_combospots = #combospots
+				-- 		}
+
+				-- 		table.insert(branches, t)
+				-- 		found_branch_on_last_word = true
+				-- 	end
+				-- end
 			else
 				--MF_alert("Step " .. tostring(step) .. ", no words here, " .. tostring(letters) .. ", " .. tostring(jletters))
 				
@@ -72,11 +203,39 @@ function calculatesentences(unitid,x,y,dir)
 					sents[step] = {}
 					combo[step] = 0
 				else
+					if found_branch_on_last_word then
+						-- If the last word is a branching_and with a perp branch but no parallel branch, treat this perp branch as if it was directly appended
+						-- to the parallel sentence
+						local branch_on_last_word = branches[#branches]
+						for _, br_text in ipairs(branch_on_last_word.branching_texts) do
+							if name_is_branching_and(br_text[3]) then
+								local br_unit = mmf.newObject(br_text[1][1])
+								br_unit.br_detected_splitted_parsing = false
+							end
+						end
+
+						-- We process this branch first in this case since it appends to the original parallel sentences
+						table.remove(branches, #branches)
+						table.insert(branches, 1, branch_on_last_word)
+					end
 					done = true
 				end
 			end
 		end
 	end
+	-- Initialize the leaf node that represents all sentences that contains all branching_ands we iterated through
+	local and_tree_sentence_leaf = {
+		count = totalvariants,
+		parent = and_tree.leaf
+	}
+	and_tree.leaf = and_tree_sentence_leaf
+
+	local curr = and_tree.parent
+	while curr ~= nil do
+		curr.count = totalvariants
+		curr = curr.parent
+	end
+	-- @End Phase 1
 	
 	--MF_alert(tostring(step) .. ", " .. tostring(totalvariants))
 	
@@ -90,6 +249,7 @@ function calculatesentences(unitid,x,y,dir)
 	
 	local combostep = 0
 	
+	-- @Phase 2
 	for i=1,totalvariants do
 		step = 1
 		sentences[i] = {}
@@ -105,8 +265,11 @@ function calculatesentences(unitid,x,y,dir)
 					local w = word[2]
 					
 					--MF_alert(tostring(i) .. ", step " .. tostring(step) .. ": " .. word[3] .. ", " .. tostring(#word[1]) .. ", " .. tostring(w))
-					
-					table.insert(sentences[i], {word[3], word[4], word[1], word[2]})
+					local text_name = parse_branching_text(word[3])
+					if text_name == "and" then
+						text_name = word[3]
+					end
+					table.insert(sentences[i], {text_name, word[4], word[1], word[2]})
 					
 					step = step + w
 				else
@@ -136,129 +299,155 @@ function calculatesentences(unitid,x,y,dir)
 			end
 		end
 	end
-
 	-- @End Phase 2
-	for _, branch in ipairs(branches) do
-		local rhs_sentences = {}
-		local rhs_totalvariants = 1
-		for _, word_unitid in ipairs(branch.firstwords) do
-			br_sentences,br_finals,br_maxpos,br_totalvariants = calculatesentences(word_unitid, branch.x, branch.y, br_dir)
-			maxpos = math.max(maxpos, br_maxpos + branch.step_index)
-			rhs_totalvariants = rhs_totalvariants * br_totalvariants
+	for br_index, branch in ipairs(branches) do
+		br_sentences,br_finals,br_maxpos,br_totalvariants = calculatesentences(branch.firstwords[1], branch.x, branch.y, br_dir)
+		maxpos = math.max(maxpos, br_maxpos + branch.step_index)
 
-			if (rhs_totalvariants >= limiter) then
-				MF_alert("Level destroyed - too many variants C")
-				destroylevel("toocomplex")
-				return nil
-			end
-
-			for _, sentence in ipairs(br_sentences) do
-				table.insert(rhs_sentences, sentence)
-			end
+		if (br_totalvariants >= limiter) then
+			MF_alert("Level destroyed - too many variants C")
+			destroylevel("toocomplex")
+			return nil
 		end
 
-		if #branch.branching_texts > 0 then
-			totalvariants = totalvariants + branch.lhs_totalvariants * rhs_totalvariants
-
+		-- If the end of the original sentence has a valid branch, then append that branch onto the main sentences
+		if found_branch_on_last_word and br_index == 1 then -- 
+			local oldtotalvariants = totalvariants
+			totalvariants = totalvariants * br_totalvariants
+			
 			if (totalvariants >= limiter) then
-				MF_alert("Level destroyed - too many variants E")
+				MF_alert("Level destroyed - too many variants F")
 				destroylevel("toocomplex")
 				return nil
 			end
 
-			for step = 1, branch.step_index do
-				combo[step] = 1
-			end
-
-			local branch_text_combo = 1
-
-			for i = 1, branch.lhs_totalvariants do
-				local br_step = 1
-				local lhs_sentence = {}
-
-				while (br_step <= branch.step_index) do
-					local c = combo[br_step]
-					
-					if (c ~= nil) then
-						if (c > 0) then
-							
-							local word = nil
-							if br_step == branch.step_index then
-								word = branch.branching_texts[c]
-							else
-								local s = sents[br_step]
-								word = s[c]
-							end
-							
-							local w = word[2]
-							
-							print("inserting into lhs "..word[3])
-							
-							-- table.insert(sentences[i], {word[3], word[4], word[1], word[2]})
-							local text_name = parse_branching_text(word[3])
-							table.insert(lhs_sentence, {text_name, word[4], word[1], word[2]})
-							
-							br_step = br_step + w
-						else
-							break
+			for s, rhs_sentence in ipairs(br_sentences) do
+				if s == #br_sentences then
+					for a=1,oldtotalvariants do
+						local lhs_sentence = sentences[a]
+						for _, word in ipairs(rhs_sentence) do
+							table.insert(lhs_sentence, word)
 						end
-					else
-						MF_alert("c is nil, " .. tostring(step))
-						break
 					end
-				end
-
-				for _, rhs_sent in ipairs(br_sentences) do
+				else
 					local final_sentence = {}
-					for _, sent_word in ipairs(lhs_sentence) do
-						table.insert(final_sentence, sent_word)
+					for a=1,oldtotalvariants do
+						local lhs_sentence = sentences[a]
+						for _, word in ipairs(lhs_sentence) do
+							table.insert(final_sentence, word)
+						end
+						for _, word in ipairs(rhs_sentence) do
+							table.insert(final_sentence, word)
+						end
 					end
-					
-					for _, sent_word in ipairs(rhs_sent) do
-						table.insert(final_sentence, sent_word)
-					end
-
 					table.insert(sentences, final_sentence)
 					table.insert(finals, {})
 				end
+			end
+		else
+			if #branch.branching_texts > 0 then
+				totalvariants = totalvariants + branch.lhs_totalvariants * br_totalvariants
+				if (totalvariants >= limiter) then
+					MF_alert("Level destroyed - too many variants E")
+					destroylevel("toocomplex")
+					return nil
+				end
 
-				if (branch.num_combospots > 0) then
-					combostep = 0
-					
-					local targetstep = combospots[combostep + 1]
-					
-					combo[targetstep] = combo[targetstep] + 1
+				for step = 1, branch.step_index do
+					combo[step] = 1
+				end
 
-					local combo_num = 0
-					local maxcombo = 0
-					if targetstep == branch.step_index then
-						combo_num = branch_text_combo
-						maxcombo = #branch.branching_texts
-					else
-						combo_num = combo[targetstep]
-						maxcombo = variantshere[targetstep]
-					end
-					
-					while (combo_num > maxcombo) do
-						if targetstep == branch.step_index then
-							branch_text_combo = 1
+				local branch_text_combo = 1
+
+				for i = 1, branch.lhs_totalvariants do
+					local br_step = 1
+					local lhs_sentence = {}
+
+					while (br_step <= branch.step_index) do
+						local c = combo[br_step]
+						
+						if (c ~= nil) then
+							if (c > 0) then
+								
+								local word = nil
+								if br_step == branch.step_index then
+									word = branch.branching_texts[c]
+								else
+									local s = sents[br_step]
+									word = s[c]
+								end
+								
+								local w = word[2]
+								
+								-- table.insert(sentences[i], {word[3], word[4], word[1], word[2]})
+								local text_name = parse_branching_text(word[3])
+								if text_name == "and" then
+									text_name = word[3]
+								end
+								table.insert(lhs_sentence, {text_name, word[4], word[1], word[2]})
+								
+								br_step = br_step + w
+							else
+								break
+							end
 						else
-							combo[targetstep] = 1
+							MF_alert("c is nil, " .. tostring(step))
+							break
+						end
+					end
+
+					for _, rhs_sent in ipairs(br_sentences) do
+						local final_sentence = {}
+						for _, sent_word in ipairs(lhs_sentence) do
+							table.insert(final_sentence, sent_word)
 						end
 						
-						combostep = (combostep + 1) % branch.num_combospots
+						for _, sent_word in ipairs(rhs_sent) do
+							table.insert(final_sentence, sent_word)
+						end
+
+						table.insert(sentences, final_sentence)
+						table.insert(finals, {})
+					end
+
+					if (branch.num_combospots > 0) then
+						combostep = 0
 						
-						targetstep = combospots[combostep + 1]
+						local targetstep = combospots[combostep + 1]
 						
-						
+						combo[targetstep] = combo[targetstep] + 1
+
+						local combo_num = 0
+						local maxcombo = 0
 						if targetstep == branch.step_index then
-							branch_text_combo = branch_text_combo + 1
 							combo_num = branch_text_combo
 							maxcombo = #branch.branching_texts
 						else
-							combo[targetstep] = combo[targetstep] + 1
 							combo_num = combo[targetstep]
 							maxcombo = variantshere[targetstep]
+						end
+						
+						while (combo_num > maxcombo) do
+							if targetstep == branch.step_index then
+								branch_text_combo = 1
+							else
+								combo[targetstep] = 1
+							end
+							
+							combostep = (combostep + 1) % branch.num_combospots
+							
+							targetstep = combospots[combostep + 1]
+							
+							
+							if targetstep == branch.step_index then
+								branch_text_combo = branch_text_combo + 1
+								combo_num = branch_text_combo
+								maxcombo = #branch.branching_texts
+							else
+								combo[targetstep] = combo[targetstep] + 1
+								combo_num = combo[targetstep]
+								maxcombo = variantshere[targetstep]
+							end
 						end
 					end
 				end
@@ -336,7 +525,6 @@ function docode(firstwords)
 				end
 				
 				--MF_alert(tostring(k) .. ", " .. tostring(variations))
-				
 				if (maxlen > 2) then
 					for i=1,variations do
 						local current = finals[i]
@@ -370,6 +558,8 @@ function docode(firstwords)
 						local sent = sentences[i]
 						
 						local thissent = ""
+						
+						local do_branching_and_sentence_elimination = false
 						
 						for wordid=1,#sent do
 							local s = sent[wordid]
@@ -523,6 +713,13 @@ function docode(firstwords)
 								end
 							end
 							
+							if stage3reached and not stop and tilename == "branching_and" then
+								local br_and_unit = mmf.newObject(tileid)
+								if br_and_unit.br_detected_splitted_parsing then
+									do_branching_and_sentence_elimination = true
+								end
+							end
+							
 							if (stage > 0) then
 								firstrealword = true
 							end
@@ -602,7 +799,35 @@ function docode(firstwords)
 								end
 							end
 						end
-						
+
+						if do_branching_and_sentence_elimination then
+							print("run eliminate on this sentence:")
+							for _,v in ipairs(current) do
+								print(v[1])
+							end
+							-- eliminate any extra verbs and nots
+							for i=1,#current do
+								local word = current[#current]
+								local wordtype = word[2]
+								if wordtype == 4 or wordtype == 1 then
+									table.remove(current, #current)
+								end
+							end
+							-- if the resulting sentence has a dangling and, remove the sentence
+							if current[#current][2] == 6 then
+								print("eliminating sentence:")
+								for _,v in ipairs(current) do
+									print(v[1])
+								end
+								local sentlen = #current
+								for i=1,sentlen do
+									table.remove(current, #current)
+								end
+							end
+						end
+
+						-- if do_branching_and_sentence_elimination then
+						-- end
 						--MF_alert(thissent)
 					end
 				end
