@@ -479,7 +479,7 @@ function docode(firstwords)
 			if (type(unitdata[1]) == "number") then
 				timedmessage("Old rule format detected. Please replace modified .lua files to ensure functionality.")
 			end
-			
+
 			local unitids = unitdata[1]
 			local unitid = unitids[1]
 			local dir = unitdata[2]
@@ -517,6 +517,10 @@ function docode(firstwords)
 				end
 				
 				donefirstwords[tileid][dir] = 1
+
+				local sents_that_might_be_removed = {}
+				local and_index = 0
+				local and_unitid_to_index = {}
 				
 				local sentences,finals,maxlen,variations = calculatesentences(unitid,x,y,dir)
 				
@@ -805,30 +809,84 @@ function docode(firstwords)
 							for _,v in ipairs(current) do
 								print(v[1])
 							end
-							-- eliminate any extra verbs and nots
-							for i=1,#current do
-								local word = current[#current]
-								local wordtype = word[2]
-								if wordtype == 4 or wordtype == 1 then
-									table.remove(current, #current)
+							local and_units = {}
+							for _,v in ipairs(current) do
+								local tilename = v[1]
+								if tilename == "branching_and" then
+									table.insert(and_units, tileid)
+									if and_unitid_to_index[tileid] == nil then
+										and_unitid_to_index[tileid] = and_index
+										and_index = and_index + 1
+									end
 								end
 							end
-							-- if the resulting sentence has a dangling and, remove the sentence
-							if current[#current][2] == 6 then
-								print("eliminating sentence:")
-								for _,v in ipairs(current) do
-									print(v[1])
-								end
-								local sentlen = #current
-								for i=1,sentlen do
-									table.remove(current, #current)
-								end
-							end
+							table.insert(sents_that_might_be_removed, {index = i, and_units = and_units})
+							-- -- eliminate any extra verbs and nots
+							-- for i=1,#current do
+							-- 	local word = current[#current]
+							-- 	local wordtype = word[2]
+							-- 	if wordtype == 4 or wordtype == 1 then
+							-- 		table.remove(current, #current)
+							-- 	end
+							-- end
+							-- -- if the resulting sentence has a dangling and, remove the sentence
+							-- if current[#current][2] == 6 then
+							-- 	print("eliminating sentence:")
+							-- 	for _,v in ipairs(current) do
+							-- 		print(v[1])
+							-- 	end
+							-- 	local sentlen = #current
+							-- 	for i=1,sentlen do
+							-- 		table.remove(current, #current)
+							-- 	end
+							-- end
 						end
 
-						-- if do_branching_and_sentence_elimination then
-						-- end
 						--MF_alert(thissent)
+					end
+				end
+
+				local and_combo_count = {}
+				for _, sent_entry in ipairs(sents_that_might_be_removed) do
+					local and_bitmask = 0
+					for _, unitid in ipairs(sent_entry.and_units) do
+						local bitindex = and_unitid_to_index[unitid]
+						and_bitmask = and_bitmask | (1 << bitindex)
+					end
+					if and_combo_count[and_bitmask] == nil then
+						and_combo_count[and_bitmask] = 1
+					else 	
+						and_combo_count[and_bitmask] = and_combo_count[and_bitmask] + 1
+					end
+
+					sent_entry.and_bitmask = and_bitmask
+				end
+				for _, sent_entry in ipairs(sents_that_might_be_removed) do
+					local current = finals[sent_entry.index]
+
+					-- eliminate any extra verbs and nots
+					for i=1,#current do
+						local word = current[#current]
+						local wordtype = word[2]
+						if wordtype == 4 or wordtype == 1 then
+							table.remove(current, #current)
+						end
+					end
+					-- if the resulting sentence has a dangling and, remove the sentence
+					if current[#current][2] == 6 then
+						local curr_count = and_combo_count[sent_entry.and_bitmask]
+						if curr_count - 1 > 0 then
+							print("eliminating sentence:")
+							for _,v in ipairs(current) do
+								print(v[1])
+							end
+							local sentlen = #current
+							for i=1,sentlen do
+								table.remove(current, #current)
+							end
+
+							and_combo_count[sent_entry.and_bitmask] = curr_count - 1
+						end
 					end
 				end
 				
