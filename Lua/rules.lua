@@ -21,15 +21,7 @@ function calculatesentences(unitid,x,y,dir)
 
 	local branches = {} -- keep track of which points in the sentence parsing we parse vertically
 	local found_branch_on_last_word = false -- flag for detecting if the tail end of a sentence parsed in one direction continues perpendicularly without branching
-	-- And tree stuff
-	local and_tree = {
-		root = nil,
-		leaf = nil,
-	}
-	local and_tree_root = nil -- root of the tree 
-	local and_tree_leaf = nil -- current leaf of the tree
-	local sent_index_to_node = {} -- mapping of index in sentences -> node in tree
-	-- Other vars: unit.br_detected_splitted_parsing: only present in branching and units. Indicates if this br_and has text in both directions. Used to determine which sentences to potentially eliminate in docode
+	local br_and_text_with_split_parsing = {} -- List of branching ands with next text in both directions. Used to determine which sentences to potentially eliminate in docode.
 
 	local br_dir = nil
 	local br_dir_vec = nil
@@ -93,8 +85,9 @@ function calculatesentences(unitid,x,y,dir)
 						table.insert(branching_texts, v)
 
 						-- initialize every branching text to not use sentence elimination by default
-						local br_unit = mmf.newObject(v[1][1])
-						br_unit.br_detected_splitted_parsing = false
+						local br_unitid = v[1][1]
+						local br_unit = mmf.newObject(br_unitid)
+						br_and_text_with_split_parsing[br_unitid] = nil
 					end
 				end
 
@@ -125,23 +118,9 @@ function calculatesentences(unitid,x,y,dir)
 						end
 						for _, br_text in ipairs(branching_texts) do
 							if name_is_branching_and(br_text[3]) then
-								local br_unit = mmf.newObject(br_text[1][1])
-								br_unit.br_detected_splitted_parsing = true
-
-														-- Build the and_tree
-								-- if name_is_branching_and(text_name) then
-								-- 	local and_node = {
-								-- 		count = 0,
-								-- 		parent = nil
-								-- 	}
-								-- 	if and_tree.root == nil then
-								-- 		and_tree.root = and_node
-								-- 	else
-								-- 		and_node.parent = and_tree.leaf
-								-- 	end
-
-								-- 	and_tree.leaf = and_node
-								-- end
+								local br_unitid = br_text[1][1]
+								local br_unit = mmf.newObject(br_unitid)
+								br_and_text_with_split_parsing[br_unitid] = true
 							end
 						end
 						local t = {
@@ -159,42 +138,6 @@ function calculatesentences(unitid,x,y,dir)
 					end
 				end
 
-				-- local test_br_unitid = nil
-				-- if #branching_texts > 0 then
-				-- 	test_br_unitid = branching_texts[1][1][1]
-				-- end
-
-				-- found_branch_on_last_word = false
-				-- if br_dir_vec and test_br_unitid then
-					
-				-- 	local br_x = x + ox*step + br_dir_vec[1]
-				-- 	local br_y = y + oy*step + br_dir_vec[2]
-				-- 	local br_tileid = br_x + br_y * roomsizex
-				-- 	local br_words, br_letters, br_justletters = codecheck(test_br_unitid, br_dir_vec[1], br_dir_vec[2], br_dir, true)
-					
-
-				-- 	if #br_words > 0 then
-				-- 		local br_firstwords = {}
-
-				-- 		for _, word in ipairs(br_words) do
-				-- 			table.insert(br_firstwords, word[1][1])
-				-- 		end
-
-				-- 		local t = {
-				-- 			branching_texts = branching_texts,
-				-- 			-- branching_and_text = branching_and_texts,
-				-- 			step_index = step, 
-				-- 			lhs_totalvariants = totalvariants/#words*#branching_texts,
-				-- 			x = br_x,
-				-- 			y = br_y,
-				-- 			firstwords = br_firstwords,
-				-- 			num_combospots = #combospots
-				-- 		}
-
-				-- 		table.insert(branches, t)
-				-- 		found_branch_on_last_word = true
-				-- 	end
-				-- end
 			else
 				--MF_alert("Step " .. tostring(step) .. ", no words here, " .. tostring(letters) .. ", " .. tostring(jletters))
 				
@@ -209,8 +152,9 @@ function calculatesentences(unitid,x,y,dir)
 						local branch_on_last_word = branches[#branches]
 						for _, br_text in ipairs(branch_on_last_word.branching_texts) do
 							if name_is_branching_and(br_text[3]) then
-								local br_unit = mmf.newObject(br_text[1][1])
-								br_unit.br_detected_splitted_parsing = false
+								local br_unitid = br_text[1][1]
+								local br_unit = mmf.newObject(br_unitid)
+								br_and_text_with_split_parsing[br_unitid] = nil
 							end
 						end
 
@@ -222,18 +166,6 @@ function calculatesentences(unitid,x,y,dir)
 				end
 			end
 		end
-	end
-	-- Initialize the leaf node that represents all sentences that contains all branching_ands we iterated through
-	local and_tree_sentence_leaf = {
-		count = totalvariants,
-		parent = and_tree.leaf
-	}
-	and_tree.leaf = and_tree_sentence_leaf
-
-	local curr = and_tree.parent
-	while curr ~= nil do
-		curr.count = totalvariants
-		curr = curr.parent
 	end
 	-- @End Phase 1
 	
@@ -301,13 +233,17 @@ function calculatesentences(unitid,x,y,dir)
 	end
 	-- @End Phase 2
 	for br_index, branch in ipairs(branches) do
-		br_sentences,br_finals,br_maxpos,br_totalvariants = calculatesentences(branch.firstwords[1], branch.x, branch.y, br_dir)
+		br_sentences,br_finals,br_maxpos,br_totalvariants,perp_br_and_texts_with_split_parsing = calculatesentences(branch.firstwords[1], branch.x, branch.y, br_dir)
 		maxpos = math.max(maxpos, br_maxpos + branch.step_index)
 
 		if (br_totalvariants >= limiter) then
 			MF_alert("Level destroyed - too many variants C")
 			destroylevel("toocomplex")
 			return nil
+		end
+
+		for unitid, _ in pairs(perp_br_and_texts_with_split_parsing) do
+			br_and_text_with_split_parsing[unitid] = true
 		end
 
 		-- If the end of the original sentence has a valid branch, then append that branch onto the main sentences
@@ -467,12 +403,13 @@ function calculatesentences(unitid,x,y,dir)
 	end
 	]]--
 	
-	return sentences,finals,maxpos,totalvariants
+	return sentences,finals,maxpos,totalvariants,br_and_text_with_split_parsing
 end
 
 function docode(firstwords)
 	local donefirstwords = {}
 	local limiter = 0
+	local br_text_in_valid_sentence = {} -- Record of branching texts that are part of a valid sentence. Each unit in this cannot be processed as a firstword (prevents double parsing in certain cases)
 	
 	if (#firstwords > 0) then
 		for k,unitdata in ipairs(firstwords) do
@@ -504,7 +441,7 @@ function docode(firstwords)
 				return
 			end
 			
-			if (donefirstwords[tileid] == nil) or ((donefirstwords[tileid] ~= nil) and (donefirstwords[tileid][dir] == nil)) and (limiter < 5000) then
+			if (not br_text_in_valid_sentence[unitid]) and ((donefirstwords[tileid] == nil) or ((donefirstwords[tileid] ~= nil) and (donefirstwords[tileid][dir] == nil)) and (limiter < 5000)) then
 				local ox,oy = 0,0
 				local name = word
 				
@@ -522,7 +459,7 @@ function docode(firstwords)
 				local and_index = 0
 				local and_unitid_to_index = {}
 				
-				local sentences,finals,maxlen,variations = calculatesentences(unitid,x,y,dir)
+				local sentences,finals,maxlen,variations,br_and_text_with_split_parsing = calculatesentences(unitid,x,y,dir)
 				
 				if (sentences == nil) then
 					return
@@ -719,7 +656,7 @@ function docode(firstwords)
 							
 							if stage3reached and not stop and tilename == "branching_and" then
 								local br_and_unit = mmf.newObject(tileid)
-								if br_and_unit.br_detected_splitted_parsing then
+								if br_and_text_with_split_parsing[tileid] then
 									do_branching_and_sentence_elimination = true
 								end
 							end
@@ -821,25 +758,6 @@ function docode(firstwords)
 								end
 							end
 							table.insert(sents_that_might_be_removed, {index = i, and_units = and_units})
-							-- -- eliminate any extra verbs and nots
-							-- for i=1,#current do
-							-- 	local word = current[#current]
-							-- 	local wordtype = word[2]
-							-- 	if wordtype == 4 or wordtype == 1 then
-							-- 		table.remove(current, #current)
-							-- 	end
-							-- end
-							-- -- if the resulting sentence has a dangling and, remove the sentence
-							-- if current[#current][2] == 6 then
-							-- 	print("eliminating sentence:")
-							-- 	for _,v in ipairs(current) do
-							-- 		print(v[1])
-							-- 	end
-							-- 	local sentlen = #current
-							-- 	for i=1,sentlen do
-							-- 		table.remove(current, #current)
-							-- 	end
-							-- end
 						end
 
 						--MF_alert(thissent)
@@ -868,7 +786,7 @@ function docode(firstwords)
 					for i=1,#current do
 						local word = current[#current]
 						local wordtype = word[2]
-						if wordtype == 4 or wordtype == 1 then
+						if wordtype == 4 or wordtype == 1 or wordtype == 7 then
 							table.remove(current, #current)
 						end
 					end
@@ -942,6 +860,14 @@ function docode(firstwords)
 								local wname = wdata[1]
 								local wtype = wdata[2]
 								local wid = wdata[3]
+
+								-- Record all branching text that is part of a valid sentence
+								for _, unitid in ipairs(wid) do
+									local unit = mmf.newObject(unitid)
+									if name_is_branching_and(unit.strings[NAME]) then
+										br_text_in_valid_sentence[unitid] = true
+									end
+								end
 								
 								testing = testing .. wname .. ", "
 								
