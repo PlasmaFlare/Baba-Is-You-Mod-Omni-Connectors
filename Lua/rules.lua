@@ -409,7 +409,7 @@ end
 function docode(firstwords)
 	local donefirstwords = {}
 	local limiter = 0
-	local br_text_in_valid_sentence = {} -- Record of branching texts that are part of a valid sentence. Each unit in this cannot be processed as a firstword (prevents double parsing in certain cases)
+	local no_firstword_br_text = {} -- Record of branching texts that should not be processed as a firstword (prevents double parsing in certain cases)
 	
 	if (#firstwords > 0) then
 		for k,unitdata in ipairs(firstwords) do
@@ -441,7 +441,7 @@ function docode(firstwords)
 				return
 			end
 			
-			if (not br_text_in_valid_sentence[unitid]) and ((donefirstwords[tileid] == nil) or ((donefirstwords[tileid] ~= nil) and (donefirstwords[tileid][dir] == nil)) and (limiter < 5000)) then
+			if (not no_firstword_br_text[unitid]) and ((donefirstwords[tileid] == nil) or ((donefirstwords[tileid] ~= nil) and (donefirstwords[tileid][dir] == nil)) and (limiter < 5000)) then
 				local ox,oy = 0,0
 				local name = word
 				
@@ -864,8 +864,8 @@ function docode(firstwords)
 								-- Record all branching text that is part of a valid sentence
 								for _, unitid in ipairs(wid) do
 									local unit = mmf.newObject(unitid)
-									if name_is_branching_and(unit.strings[NAME]) then
-										br_text_in_valid_sentence[unitid] = true
+									if name_is_branching_text(unit.strings[NAME]) and (wtype == 6 or wtype == 7) and (stage == 0 or stage == 7) then
+										no_firstword_br_text[unitid] = true
 									end
 								end
 								
