@@ -1062,3 +1062,4 @@ function docode(firstwords)
 		end
 	end
 end
+

@@ -1,6 +1,8 @@
-Geez, this was a complex mod for a toy idea.
+**BEFORE YOU DOWNLOAD:** to maintain mod compatability within my mods while keeping mod management simple, this repository will not be updated further. Instead, I recommend you download to my baba modpack repository here: https://github.com/PlasmaFlare/plasma-baba-mods. Future updates to this mod will be pushed to this modpack so that mod compatability is less of a hassle.
 
 # Baba is You Mod - Omni Connectors
+Geez, this was a complex mod for a toy idea.
+
 Adds variants of all connector texts (is, has, near, facing, make, etc) where sentence parsing can split in both directions, creating...interesting sentence layouts.
 
 So stuff like this ~~abomination~~ is possible:
